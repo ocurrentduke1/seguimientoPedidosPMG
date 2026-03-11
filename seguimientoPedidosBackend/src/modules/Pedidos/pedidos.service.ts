@@ -28,7 +28,8 @@ export const getPermiso = async (pedido: string, etapa: string) =>{
   .input("etapa", sql.VarChar, etapa)
   .query(`SELECT TOP 1 TRIM(USUARIO) AS USUARIO
     FROM REG00506_INCIDEN
-    WHERE PEDIDO = @pedido `);
+    WHERE PEDIDO = @pedido AND ETAPA = @etapa
+    ORDER BY NUMERO DESC`);
 
   return result.recordset[0];
 }

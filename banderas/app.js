@@ -7,9 +7,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnAE = document.getElementById("btnAE");
     const btnVerificador = document.getElementById("btnVerificador");
 
-    console.log("¡App cargada correctamente!");
+    inputCodigo.focus();
 
-    const API = "http://DIRECCION_IP/api"
+    const API = "http://192.168.108.13:3000/api"
 
     let etapasActivas = [];
     let rolActual = null;
@@ -39,7 +39,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const response = await fetch(`${API}/pedidos?pedido=${codigo}`);
 
             if (!response.ok) {
-                alert("Error al obtener pedido");
+                const error = await response.json();
+                mostrarToast(error.error || error.message || "Error al obtener pedido");
                 return;
             }
 
@@ -50,11 +51,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             etapasActivas = data.ETAPA.toString().split(".");
 
-            const codigoEmpleado = prompt("Ingrese código de empleado:");
+            abrirModalEmpleado(data);
 
-            if (!codigoEmpleado) return;
-
-            await validarEmpleado(codigoEmpleado);
             bloquearBotones(false);
 
             actualizarUI();
@@ -90,12 +88,12 @@ document.addEventListener("DOMContentLoaded", () => {
     async function enviarPatch(etapaDestino) {
 
         if (!tienePermiso(etapaDestino)) {
-            alert("No tiene permiso para ejecutar esta acción");
+            mostrarToast("No tiene permiso para ejecutar esta acción");
             return;
         }
 
         if (!inputCodigo.value || etapasActivas.length === 0) {
-            alert("No hay pedido cargado");
+            mostrarToast("No hay pedido cargado");
             return;
         }
 
@@ -120,7 +118,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     error.message ||
                     "Error actualizando etapa";
 
-                alert(`⚠️ ${mensaje}`);
+                mostrarToast(mensaje);
 
                 bloquearBotones(false);
                 return;
@@ -150,7 +148,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const response = await fetch(`${API}/usuarios?codigo=${codigoEmpleado}`);
 
             if (!response.ok) {
-                alert("Empleado no válido");
+                const error = await response.json();
+                mostrarToast(error.error || error.message || "Empleado no válido");
                 return;
             }
 
@@ -168,7 +167,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         } catch (error) {
             console.error(error);
-            alert("Error validando empleado");
+            mostrarToast("Error de conexión al validar empleado");
         }
     }
 
@@ -257,6 +256,185 @@ document.addEventListener("DOMContentLoaded", () => {
             case "4": return "Surtidor AE";
             default: return "Desconocido";
         }
+    }
+
+    // ================================
+    // MODAL EMPLEADO
+    // ================================
+    let dataPedidoPendiente = null;
+
+    function abrirModalEmpleado(data) {
+        dataPedidoPendiente = data;
+        const modal = document.getElementById("modalEmpleado");
+        const inputModal = document.getElementById("inputEmpleadoModal");
+        modal.classList.remove("hidden");
+        setTimeout(() => inputModal.focus(), 100);
+    }
+
+    function cerrarModal() {
+        const modal = document.getElementById("modalEmpleado");
+        const inputModal = document.getElementById("inputEmpleadoModal");
+        modal.classList.add("hidden");
+        inputModal.value = "";
+        dataPedidoPendiente = null;
+        // Devolver foco al input principal
+        inputCodigo.focus();
+    }
+
+    document.getElementById("btnCancelarModal").addEventListener("click", () => {
+        cerrarModal();
+    });
+
+    document.getElementById("btnConfirmarModal").addEventListener("click", async () => {
+        const codigoEmpleado = document.getElementById("inputEmpleadoModal").value.trim();
+        if (!codigoEmpleado) return;
+
+        await validarEmpleado(codigoEmpleado);
+
+        if (!validarPermisoSegunEtapa()) {
+            cerrarModal();
+            resetearApp(); // espera a que el toast se vea antes de limpiar
+            return;
+        }
+
+        cerrarModal();
+        bloquearBotones(false);
+        actualizarUI();
+    });
+
+    // Confirmar con Enter desde el modal
+    document.getElementById("inputEmpleadoModal").addEventListener("keypress", async (e) => {
+        if (e.key !== "Enter") return;
+        const codigoEmpleado = e.target.value.trim();
+        if (!codigoEmpleado) return;
+
+        await validarEmpleado(codigoEmpleado);
+
+        if (!validarPermisoSegunEtapa()) {
+            cerrarModal();
+            resetearApp(); // espera a que el toast se vea antes de limpiar
+            return;
+        }
+
+        cerrarModal();
+        bloquearBotones(false);
+        actualizarUI();
+    });
+
+    // ================================
+    // TOAST
+    // ================================
+    function mostrarToast(mensaje, tipo = "error") {
+        const toast = document.getElementById("toast");
+        const inner = document.getElementById("toastInner");
+        const texto = document.getElementById("toastMensaje");
+
+        texto.textContent = mensaje;
+
+        inner.className = `mx-4 w-full max-w-sm px-8 py-5 rounded-2xl text-base font-medium text-center
+        backdrop-blur-md shadow-2xl border transition-all duration-500
+        ${tipo === "error"
+                ? "bg-red-500/20 border-red-400/30 text-red-300"
+                : "bg-green-500/20 border-green-400/30 text-green-300"
+            }`;
+
+        toast.classList.remove("hidden");
+
+        setTimeout(() => {
+            toast.classList.add("hidden");
+        }, 4500);
+    }
+
+    // ================================
+    // VALIDAR PERMISO POR ETAPA
+    // ================================
+    function validarPermisoSegunEtapa() {
+
+        // Rol 1 (supervisor) siempre puede
+        if (rolActual === "1") return true;
+
+        const tieneMCInicio = etapasActivas.includes("2");
+        const tieneMCFin = etapasActivas.includes("4");
+        const tieneAEInicio = etapasActivas.includes("3");
+        const tieneAEFin = etapasActivas.includes("5");
+        const tieneRevision = etapasActivas.includes("6");
+        const tieneRevFin = etapasActivas.includes("7");
+
+        // Surtidor MC (rol 2)
+        if (rolActual === "2") {
+            // Si MC ya terminó, o ya está en revisión/fin → no puede actuar
+            if (tieneMCFin || tieneRevision || tieneRevFin) {
+                mostrarToast("El surtido MC ya fue completado en este pedido.");
+                return false;
+            }
+            return true;
+        }
+
+        // Surtidor AE (rol 4)
+        if (rolActual === "4") {
+            // Si AE ya terminó, o ya está en revisión/fin → no puede actuar
+            if (tieneAEFin || tieneRevision || tieneRevFin) {
+                mostrarToast("El surtido AE ya fue completado en este pedido.");
+                return false;
+            }
+            return true;
+        }
+
+        // Verificador (rol 3)
+        if (rolActual === "3") {
+            // Necesita al menos un fin (4 o 5) y no puede haber surtimientos activos sin concluir
+            const hayMCActivo = tieneMCInicio && !tieneMCFin;
+            const hayAEActivo = tieneAEInicio && !tieneAEFin;
+
+            if (hayMCActivo || hayAEActivo) {
+                mostrarToast("Aún hay surtimientos en proceso. No se puede revisar.");
+                return false;
+            }
+
+            if (!tieneMCFin && !tieneAEFin) {
+                mostrarToast("El pedido aun no se ha surtido. No se puede revisar.");
+                return false;
+            }
+
+            if (tieneRevFin) {
+                mostrarToast("Este pedido ya fue revisado y cerrado.");
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // ================================
+    // RESET
+    // ================================
+    function resetearApp() {
+        // Limpiar inputs
+        inputCodigo.value = "";
+        inputBandera.value = "";
+
+        // Limpiar estado
+        etapasActivas = [];
+        rolActual = null;
+        nombreUsuario = null;
+
+        // Ocultar info empleado
+        document.getElementById("infoEmpleado").classList.add("hidden");
+        document.getElementById("codigoEmpleadoMostrado").textContent = "---";
+        document.getElementById("rolEmpleadoMostrado").textContent = "---";
+
+        // Ocultar y resetear botones
+        btnMC.style.display = "none";
+        btnAE.style.display = "none";
+        btnVerificador.style.display = "none";
+        btnMC.disabled = false;
+        btnAE.disabled = false;
+        btnVerificador.disabled = false;
+
+        // Foco de vuelta al input principal
+        inputCodigo.focus();
     }
 
 });
