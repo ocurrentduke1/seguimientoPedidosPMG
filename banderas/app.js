@@ -30,56 +30,10 @@ document.addEventListener("DOMContentLoaded", () => {
     inputCodigo.addEventListener("keypress", async (e) => {
 
         if (e.key !== "Enter") return;
-
         const codigo = inputCodigo.value;
-
         if (!codigo) return;
 
-        try {
-            const response = await fetch(`${API}/pedidos?pedido=${codigo}`);
-
-            if (!response.ok) {
-                const error = await response.json();
-                mostrarToast(error.error || error.message || "Error al obtener pedido");
-                inputCodigo.focus();
-                resetearApp(); // espera a que el toast se vea antes de limpiar
-                return;
-            }
-
-            const data = await response.json();
-
-            inputBandera.value = `${data.ETAPA} - ${data.descripcionEtapa}`;
-            console.log("etapa", data.descripcionEtapa);
-
-            etapasActivas = data.ETAPA.toString().split(".");
-
-            // ================================
-            // VALIDAR ETAPAS DE SOLO LECTURA
-            // ================================
-            const mensajesBloqueo = {
-                7: "El pedido ya fue revisado.",
-                8: "El pedido está en subdistribuidores.",
-                9: "El pedido ya está facturado.",
-                10: "El pedido ya fue entregado."
-            };
-
-            const etapaBloqueada = etapasActivas.find(e => mensajesBloqueo[e]);
-
-            if (etapaBloqueada) {
-                mostrarToast(mensajesBloqueo[etapaBloqueada]);
-                resetearApp();
-                return;
-            }
-
-            abrirModalEmpleado(data);
-
-            bloquearBotones(false);
-
-            actualizarUI();
-
-        } catch (error) {
-            console.error("Error:", error);
-        }
+        abrirModalEmpleado();
 
     });
 
@@ -189,7 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("rolEmpleadoMostrado").textContent = obtenerNombreRol(rolActual);
             document.getElementById("infoEmpleado").classList.remove("hidden");
 
-            configurarBotonesSegunRol();
+            return true;
 
         } catch (error) {
             console.error(error);
@@ -327,40 +281,9 @@ document.addEventListener("DOMContentLoaded", () => {
         cerrarModal();
     });
 
-    document.getElementById("btnConfirmarModal").addEventListener("click", async () => {
-        const codigoEmpleado = document.getElementById("inputEmpleadoModal").value.trim();
-        if (!codigoEmpleado) return;
-
-        await validarEmpleado(codigoEmpleado);
-
-        if (!validarPermisoSegunEtapa()) {
-            cerrarModal();
-            resetearApp(); // espera a que el toast se vea antes de limpiar
-            return;
-        }
-
-        cerrarModal();
-        bloquearBotones(false);
-        actualizarUI();
-    });
-
-    // Confirmar con Enter desde el modal
-    document.getElementById("inputEmpleadoModal").addEventListener("keypress", async (e) => {
-        if (e.key !== "Enter") return;
-        const codigoEmpleado = e.target.value.trim();
-        if (!codigoEmpleado) return;
-
-        await validarEmpleado(codigoEmpleado);
-
-        if (!validarPermisoSegunEtapa()) {
-            cerrarModal();
-            resetearApp(); // espera a que el toast se vea antes de limpiar
-            return;
-        }
-
-        cerrarModal();
-        bloquearBotones(false);
-        actualizarUI();
+    document.getElementById("btnConfirmarModal").addEventListener("click", confirmarModal);
+    document.getElementById("inputEmpleadoModal").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") confirmarModal();
     });
 
     // ================================
@@ -482,6 +405,69 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Foco de vuelta al input principal
         inputCodigo.focus();
+    }
+
+    // ================================
+    // CONFIRMAR MODAL — GET + validaciones
+    // ================================
+    async function confirmarModal() {
+        const codigoEmpleado = document.getElementById("inputEmpleadoModal").value.trim();
+        if (!codigoEmpleado) return;
+
+        // 1. Validar empleado primero
+        const empleadoValido = await validarEmpleado(codigoEmpleado);
+        if (!empleadoValido) return;
+
+        // Luego hacer el GET con usuario
+        const codigo = inputCodigo.value.trim();
+        try {
+            const response = await fetch(`${API}/pedidos?pedido=${codigo}&usuario=${nombreUsuario}&rol=${rolActual}`);
+
+            if (!response.ok) {
+                const error = await response.json();
+                mostrarToast(error.error || error.message || "Error al obtener pedido");
+                cerrarModal();
+                resetearApp();
+                return;
+            }
+
+            const data = await response.json();
+
+            inputBandera.value = `${data.ETAPA} - ${data.descripcionEtapa}`;
+            etapasActivas = data.ETAPA.toString().split(".");
+
+            const mensajesBloqueo = {
+                7: "El pedido ya fue revisado.",
+                8: "El pedido está en subdistribuidores.",
+                9: "El pedido ya está facturado.",
+                10: "El pedido ya fue entregado."
+            };
+
+            const etapaBloqueada = etapasActivas.find(e => mensajesBloqueo[e]);
+            if (etapaBloqueada) {
+                mostrarToast(mensajesBloqueo[etapaBloqueada]);
+                cerrarModal();
+                resetearApp();
+                return;
+            }
+
+            if (!validarPermisoSegunEtapa()) {
+                cerrarModal();
+                resetearApp();
+                return;
+            }
+
+            cerrarModal();
+            bloquearBotones(false);
+            actualizarUI();
+            configurarBotonesSegunRol();
+
+        } catch (error) {
+            console.error("Error:", error);
+            mostrarToast("Error de conexión");
+            cerrarModal();
+            resetearApp();
+        }
     }
 
 });
