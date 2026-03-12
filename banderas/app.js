@@ -9,7 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     inputCodigo.focus();
 
-    const API = "http://192.168.108.13:3000/api"
+    const API = "http://192.168.108.36:3000/api"
 
     let etapasActivas = [];
     let rolActual = null;
@@ -41,6 +41,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) {
                 const error = await response.json();
                 mostrarToast(error.error || error.message || "Error al obtener pedido");
+                inputCodigo.focus();
+                resetearApp(); // espera a que el toast se vea antes de limpiar
                 return;
             }
 
@@ -50,6 +52,24 @@ document.addEventListener("DOMContentLoaded", () => {
             console.log("etapa", data.descripcionEtapa);
 
             etapasActivas = data.ETAPA.toString().split(".");
+
+            // ================================
+            // VALIDAR ETAPAS DE SOLO LECTURA
+            // ================================
+            const mensajesBloqueo = {
+                7: "El pedido ya fue revisado.",
+                8: "El pedido está en subdistribuidores.",
+                9: "El pedido ya está facturado.",
+                10: "El pedido ya fue entregado."
+            };
+
+            const etapaBloqueada = etapasActivas.find(e => mensajesBloqueo[e]);
+
+            if (etapaBloqueada) {
+                mostrarToast(mensajesBloqueo[etapaBloqueada]);
+                resetearApp();
+                return;
+            }
 
             abrirModalEmpleado(data);
 
@@ -89,11 +109,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (!tienePermiso(etapaDestino)) {
             mostrarToast("No tiene permiso para ejecutar esta acción");
+            inputCodigo.focus();
+            resetearApp(); // espera a que el toast se vea antes de limpiar
             return;
         }
 
         if (!inputCodigo.value || etapasActivas.length === 0) {
             mostrarToast("No hay pedido cargado");
+            inputCodigo.focus();
+            resetearApp(); // espera a que el toast se vea antes de limpiar
             return;
         }
 
@@ -117,10 +141,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     error.error ||
                     error.message ||
                     "Error actualizando etapa";
-
                 mostrarToast(mensaje);
-
-                bloquearBotones(false);
+                inputCodigo.focus();
+                resetearApp(); // espera a que el toast se vea antes de limpiar
                 return;
             }
 
@@ -129,10 +152,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // 🔥 SIEMPRE sincronizamos desde backend
             etapasActivas = data.ETAPA.toString().split(".");
+
             inputBandera.value = `${data.ETAPA} - ${data.descripcionEtapa}`;
 
-            bloquearBotones(false);
-            actualizarUI();
+            mostrarToast(`✓ Se avanza a ${data.descripcionEtapa}`, "success");
+
+            resetearApp(); // espera a que el toast se vea antes de limpiar
 
         } catch (error) {
             console.error(error);
@@ -150,6 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) {
                 const error = await response.json();
                 mostrarToast(error.error || error.message || "Empleado no válido");
+                inputCodigo.focus();
                 return;
             }
 
@@ -168,6 +194,8 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
             console.error(error);
             mostrarToast("Error de conexión al validar empleado");
+            inputCodigo.focus();
+            resetearApp(); // espera a que el toast se vea antes de limpiar
         }
     }
 
@@ -186,20 +214,34 @@ document.addEventListener("DOMContentLoaded", () => {
     // ================================
     function configurarBotonesSegunRol() {
 
-        // Ocultar todo primero
+        const hayMCActivo = etapasActivas.includes("2") && !etapasActivas.includes("4");
+        const hayAEActivo = etapasActivas.includes("3") && !etapasActivas.includes("5");
+        const MCTerminado = etapasActivas.includes("4");
+        const AETerminado = etapasActivas.includes("5");
+        const enRevision = etapasActivas.includes("6");
+        const yaRevisado = etapasActivas.includes("7");
+        const esPedidoNuevo = etapasActivas.includes("1");
+        const tieneSurtidoCompleto = etapasActivas.includes("4") || etapasActivas.includes("5");
+
+        const puedeVerVerificador = !hayMCActivo && !hayAEActivo && !esPedidoNuevo
+            && !yaRevisado && (tieneSurtidoCompleto || enRevision);
+
+        // Botones de surtimiento — ocultar si está en revisión o ya cerrado
+        const puedeSurtir = !enRevision && !yaRevisado;
+
         btnMC.style.display = "none";
         btnAE.style.display = "none";
         btnVerificador.style.display = "none";
 
-        if (rolActual === "1" || rolActual === "2") {
+        if (puedeSurtir && !MCTerminado && (rolActual === "1" || rolActual === "2")) {
             btnMC.style.display = "block";
         }
 
-        if (rolActual === "1" || rolActual === "4") {
+        if (puedeSurtir && !AETerminado && (rolActual === "1" || rolActual === "4")) {
             btnAE.style.display = "block";
         }
 
-        if (rolActual === "1" || rolActual === "3") {
+        if (puedeVerVerificador && (rolActual === "1" || rolActual === "3")) {
             btnVerificador.style.display = "block";
         }
     }
@@ -365,6 +407,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // Si MC ya terminó, o ya está en revisión/fin → no puede actuar
             if (tieneMCFin || tieneRevision || tieneRevFin) {
                 mostrarToast("El surtido MC ya fue completado en este pedido.");
+                inputCodigo.focus();
                 return false;
             }
             return true;
@@ -375,6 +418,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // Si AE ya terminó, o ya está en revisión/fin → no puede actuar
             if (tieneAEFin || tieneRevision || tieneRevFin) {
                 mostrarToast("El surtido AE ya fue completado en este pedido.");
+                inputCodigo.focus();
                 return false;
             }
             return true;
@@ -388,16 +432,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (hayMCActivo || hayAEActivo) {
                 mostrarToast("Aún hay surtimientos en proceso. No se puede revisar.");
+                inputCodigo.focus();
                 return false;
             }
 
-            if (!tieneMCFin && !tieneAEFin) {
+            if (!tieneMCFin && !tieneAEFin && !tieneRevision) {
                 mostrarToast("El pedido aun no se ha surtido. No se puede revisar.");
+                inputCodigo.focus();
                 return false;
             }
 
             if (tieneRevFin) {
                 mostrarToast("Este pedido ya fue revisado y cerrado.");
+                inputCodigo.focus();
                 return false;
             }
 
